@@ -1,0 +1,8 @@
+target/ 
+*.class 
+*.jar 
+.nb-gradle/ 
+build/ 
+nbproject/private/ 
+*.csv 
+*.pdf
