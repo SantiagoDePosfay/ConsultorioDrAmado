@@ -5,13 +5,14 @@ import consultorio.modelo.Paciente;
 import consultorio.modelo.Turno;
 import consultorio.negocio.ConsultorioServicio;
 import consultorio.negocio.GeneradorPDF;
-import java.time.DayOfWeek;
+
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Scanner;
+import java.util.Set;
 
 public class MainConsola {
 
@@ -19,43 +20,50 @@ public class MainConsola {
     private static final ConsultorioServicio servicio = new ConsultorioServicio();
     private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
+    // Excepcion interna para cancelar cualquier carga y retornar al menu principal
+    private static class OperacionCanceladaException extends RuntimeException {}
+
     public static void main(String[] args) {
         int opcion = -1;
 
         while (opcion != 0) {
             mostrarMenuPrincipal();
-            opcion = leerEntero("Seleccione una opcion: ");
+            try {
+                opcion = leerEnteroOpcion("Seleccione una opcion: ");
 
-            switch (opcion) {
-                case 1:
-                    registrarPaciente();
-                    break;
-                case 2:
-                    registrarNuevoTurno();
-                    break;
-                case 3:
-                    consultarAgendaDiaria();
-                    break;
-                case 4:
-                    exportarAgendaDirectaPDF();
-                    break;
-                case 5:
-                    cancelarTurno();
-                    break;
-                case 6:
-                    modificarTurno();
-                    break;
-                case 7:
-                    registrarAsistencia();
-                    break;
-                case 8:
-                    consultarHistorial();
-                    break;
-                case 0:
-                    System.out.println("\nGracias por utilizar el sistema del Consultorio Dr. Salvador Amado. Hasta luego.");
-                    break;
-                default:
-                    System.out.println("Opcion no valida. Ingrese un numero del 0 al 8.");
+                switch (opcion) {
+                    case 1:
+                        registrarPaciente();
+                        break;
+                    case 2:
+                        registrarNuevoTurno();
+                        break;
+                    case 3:
+                        consultarAgendaHoy();
+                        break;
+                    case 4:
+                        consultarAgendaPorFecha();
+                        break;
+                    case 5:
+                        cancelarTurno();
+                        break;
+                    case 6:
+                        modificarTurno();
+                        break;
+                    case 7:
+                        registrarAsistencia();
+                        break;
+                    case 8:
+                        consultarHistorial();
+                        break;
+                    case 0:
+                        System.out.println("\nGracias por utilizar el sistema del Consultorio Dr. Salvador Amado. Hasta luego.");
+                        break;
+                    default:
+                        System.out.println("Opcion no valida. Ingrese un numero del 0 al 8.");
+                }
+            } catch (OperacionCanceladaException e) {
+                System.out.println("\n>> Operacion cancelada por el usuario. Retornando al menu principal...");
             }
         }
     }
@@ -67,11 +75,12 @@ public class MainConsola {
     private static void mostrarMenuPrincipal() {
         System.out.println("\n=======================================================");
         System.out.println("  SISTEMA DE GESTION DE TURNOS - DR. SALVADOR AMADO");
+        System.out.println("  (Escriba 'MENU' en cualquier campo para cancelar)");
         System.out.println("=======================================================");
         System.out.println("1. Identificar y dar de alta paciente");
         System.out.println("2. Registrar nuevo turno");
-        System.out.println("3. Consultar agenda diaria");
-        System.out.println("4. Exportar agenda diaria a PDF");
+        System.out.println("3. Ver / Exportar agenda de hoy");
+        System.out.println("4. Ver / Exportar agenda por fecha");
         System.out.println("5. Cancelar turno (regla 24 hs)");
         System.out.println("6. Modificar / reprogramar turno");
         System.out.println("7. Registrar asistencia (Atendido / Ausente)");
@@ -132,24 +141,20 @@ public class MainConsola {
             System.out.println("Paciente encontrado: " + paciente.getNombreCompleto() + " (" + paciente.getObraSocial() + ")");
         }
 
-        LocalDate fecha;
-        while (true) {
-            fecha = leerFecha("Ingrese fecha del turno (DD/MM/AAAA): ");
-            DayOfWeek dia = fecha.getDayOfWeek();
-            if (dia == DayOfWeek.SATURDAY || dia == DayOfWeek.SUNDAY) {
-                System.out.println("Error: El consultorio atiende unicamente de lunes a viernes.");
-            } else {
-                break;
+        LocalDate fecha = leerFechaTurnoValidada("Ingrese fecha del turno (DD/MM/AAAA): ");
+
+        // Alerta preventiva si ya tiene otro turno pendiente el mismo dia
+        if (servicio.tieneTurnoPendienteEnFecha(dni, fecha)) {
+            System.out.println("\n[!] ADVERTENCIA: El paciente ya posee otro turno PENDIENTE para el dia " + fecha.format(FORMATO_FECHA) + ".");
+            System.out.print("Desea asignarle un turno adicional para este mismo dia? (S/N): ");
+            String confirmacion = leerCadenaTeclado();
+            if (!confirmacion.equalsIgnoreCase("S")) {
+                System.out.println("Registro de turno cancelado.");
+                return;
             }
         }
 
-        LocalTime hora = seleccionarHorarioDeGrilla();
-
-        String error = servicio.validarDisponibilidad(fecha, hora, -1);
-        if (error != null) {
-            System.out.println("Error: " + error);
-            return;
-        }
+        LocalTime hora = seleccionarHorarioDeGrilla(fecha, -1);
 
         System.out.print("Ingrese motivo de la consulta: ");
         String motivo = leerTextoNoVacio();
@@ -158,49 +163,42 @@ public class MainConsola {
         System.out.println("Turno registrado exitosamente en estado PENDIENTE.");
     }
 
-    // =========================================
-    // FUNCIONALIDAD 3: CONSULTAR AGENDA DIARIA 
-    // =========================================
+    // ===============================================
+    // FUNCIONALIDAD 3: VER / EXPORTAR AGENDA DE HOY 
+    // ===============================================
 
-    private static void consultarAgendaDiaria() {
-        System.out.println("\n--- CONSULTAR AGENDA DIARIA ---");
-        LocalDate fecha = leerFecha("Ingrese fecha a consultar (DD/MM/AAAA): ");
+    private static void consultarAgendaHoy() {
+        LocalDate hoy = LocalDate.now();
+        System.out.println("\n--- AGENDA DEL DIA DE HOY (" + hoy.format(FORMATO_FECHA) + ") ---");
+        procesarConsultaAgenda(hoy);
+    }
 
+    // ==================================================
+    // FUNCIONALIDAD 4: VER / EXPORTAR AGENDA POR FECHA 
+    // ==================================================
+
+    private static void consultarAgendaPorFecha() {
+        System.out.println("\n--- CONSULTAR AGENDA POR FECHA ---");
+        LocalDate fecha = leerFechaFormato("Ingrese fecha a consultar (DD/MM/AAAA): ");
+        procesarConsultaAgenda(fecha);
+    }
+
+    private static void procesarConsultaAgenda(LocalDate fecha) {
         List<Turno> turnos = servicio.obtenerAgendaDiaria(fecha);
         if (turnos.isEmpty()) {
-            System.out.println("No hay turnos asignados para la fecha seleccionada.");
+            System.out.println("No hay turnos asignados para la fecha seleccionada (" + fecha.format(FORMATO_FECHA) + ").");
             return;
         }
 
         mostrarListadoTurnosConDetalle(turnos);
 
         System.out.print("\nDesea exportar esta agenda a PDF? (S/N): ");
-        String respuesta = scanner.nextLine().trim();
+        String respuesta = leerCadenaTeclado();
         if (respuesta.equalsIgnoreCase("S")) {
             boolean exito = GeneradorPDF.exportarAgendaPDF(fecha, turnos, servicio);
             if (exito) {
                 System.out.println("Archivo PDF 'agenda_" + fecha + ".pdf' generado correctamente.");
             }
-        }
-    }
-
-    // ========================================
-    // FUNCIONALIDAD 4: EXPORTAR A PDF DIRECTO 
-    // ========================================
-
-    private static void exportarAgendaDirectaPDF() {
-        System.out.println("\n--- EXPORTAR AGENDA DIARIA A PDF ---");
-        LocalDate fecha = leerFecha("Ingrese la fecha de la agenda (DD/MM/AAAA): ");
-
-        List<Turno> turnos = servicio.obtenerAgendaDiaria(fecha);
-        if (turnos.isEmpty()) {
-            System.out.println("No hay turnos asignados para la fecha seleccionada. No se genera PDF.");
-            return;
-        }
-
-        boolean exito = GeneradorPDF.exportarAgendaPDF(fecha, turnos, servicio);
-        if (exito) {
-            System.out.println("Archivo PDF 'agenda_" + fecha + ".pdf' generado correctamente.");
         }
     }
 
@@ -225,7 +223,7 @@ public class MainConsola {
                                " | Hora: " + t.getHoraInicio() + " a " + t.getHoraFin() + " | Motivo: " + t.getMotivo());
         }
 
-        int seleccion = leerEntero("\nSeleccione el numero de turno a cancelar (0 para volver): ");
+        int seleccion = leerEnteroOpcion("\nSeleccione el numero de turno a cancelar (0 para volver): ");
         if (seleccion <= 0 || seleccion > pendientes.size()) {
             System.out.println("Operacion cancelada.");
             return;
@@ -233,7 +231,7 @@ public class MainConsola {
 
         Turno elegido = pendientes.get(seleccion - 1);
         System.out.print("Confirma la cancelacion del turno ID #" + elegido.getIdTurno() + "? (S/N): ");
-        String confirmacion = scanner.nextLine().trim();
+        String confirmacion = leerCadenaTeclado();
 
         if (!confirmacion.equalsIgnoreCase("S")) {
             System.out.println("Cancelacion abortada.");
@@ -268,7 +266,7 @@ public class MainConsola {
                                " " + t.getHoraInicio() + " | " + t.getMotivo());
         }
 
-        int seleccion = leerEntero("\nSeleccione el numero de turno a modificar (0 para cancelar): ");
+        int seleccion = leerEnteroOpcion("\nSeleccione el numero de turno a modificar (0 para cancelar): ");
         if (seleccion <= 0 || seleccion > pendientes.size()) {
             System.out.println("Operacion cancelada.");
             return;
@@ -277,13 +275,15 @@ public class MainConsola {
         Turno elegido = pendientes.get(seleccion - 1);
 
         System.out.println("\nIngrese los nuevos datos del turno:");
-        LocalDate nuevaFecha = leerFecha("Nueva fecha (DD/MM/AAAA): ");
-        LocalTime nuevaHora = seleccionarHorarioDeGrilla();
+        LocalDate nuevaFecha = leerFechaTurnoValidada("Nueva fecha (DD/MM/AAAA): ");
+        LocalTime nuevaHora = seleccionarHorarioDeGrilla(nuevaFecha, elegido.getIdTurno());
 
         System.out.print("Nuevo motivo (Enter para conservar actual '" + elegido.getMotivo() + "'): ");
-        String nuevoMotivo = scanner.nextLine().trim();
+        String nuevoMotivo = leerCadenaTeclado();
         if (nuevoMotivo.isEmpty()) {
             nuevoMotivo = elegido.getMotivo();
+        } else {
+            nuevoMotivo = nuevoMotivo.replace(",", " - ");
         }
 
         String error = servicio.modificarTurno(elegido.getIdTurno(), nuevaFecha, nuevaHora, nuevoMotivo);
@@ -295,9 +295,14 @@ public class MainConsola {
         }
     }
 
+    // ==========================================
+    // FUNCIONALIDAD 7: ASISTENCIA
+    // ==========================================
+
     private static void registrarAsistencia() {
         System.out.println("\n--- REGISTRAR ASISTENCIA ---");
-        int idTurno = leerEntero("Ingrese ID del turno: ");
+        int idTurno = leerEnteroOpcion("Ingrese ID del turno (0 para volver): ");
+        if (idTurno == 0) return;
 
         Turno turno = servicio.buscarTurnoPorId(idTurno);
         if (turno == null) {
@@ -314,7 +319,7 @@ public class MainConsola {
                            " " + turno.getHoraInicio() + " | Paciente DNI: " + turno.getDniPaciente());
         System.out.println("1. Marcar como ATENDIDO (Asistio a la consulta)");
         System.out.println("2. Marcar como AUSENTE (No concurrio)");
-        int opcionEstado = leerEntero("Seleccione opcion: ");
+        int opcionEstado = leerEnteroOpcion("Seleccione opcion: ");
 
         EstadoTurno nuevoEstado;
         if (opcionEstado == 1) {
@@ -343,14 +348,14 @@ public class MainConsola {
         System.out.println("Opciones de filtrado (Enter en blanco para omitir filtro):");
 
         System.out.print("DNI del paciente (o Enter para omitir): ");
-        String dni = scanner.nextLine().trim();
+        String dni = leerCadenaTeclado();
 
         System.out.print("Fecha Desde DD/MM/AAAA (o Enter para omitir): ");
-        String desdeStr = scanner.nextLine().trim();
+        String desdeStr = leerCadenaTeclado();
         LocalDate fechaDesde = parsearFechaOpcional(desdeStr);
 
         System.out.print("Fecha Hasta DD/MM/AAAA (o Enter para omitir): ");
-        String hastaStr = scanner.nextLine().trim();
+        String hastaStr = leerCadenaTeclado();
         LocalDate fechaHasta = parsearFechaOpcional(hastaStr);
         
         if (fechaDesde != null && fechaHasta != null && fechaDesde.isAfter(fechaHasta)) {
@@ -366,7 +371,6 @@ public class MainConsola {
 
         mostrarListadoTurnosConDetalle(historial);
 
-        // Resumen estadistico 
         int cantPendientes = 0, cantAtendidos = 0, cantCancelados = 0, cantAusentes = 0;
         for (Turno t : historial) {
             switch (t.getEstado()) {
@@ -411,43 +415,98 @@ public class MainConsola {
         System.out.println("------------------------------------------------------------------------------------------------------");
     }
 
-    private static LocalTime seleccionarHorarioDeGrilla() {
-        System.out.println("\nSeleccione bloque de inicio (Grilla de 40 min):");
-        for (int i = 0; i < ConsultorioServicio.GRILLA_HORARIOS.length; i++) {
-            System.out.printf("[%2d] %s  ", (i + 1), ConsultorioServicio.GRILLA_HORARIOS[i]);
-            if ((i + 1) % 6 == 0) System.out.println();
+    private static LocalTime seleccionarHorarioDeGrilla(LocalDate fecha, int idTurnoIgnorar) {
+        Set<LocalTime> ocupados = servicio.obtenerHorariosOcupados(fecha, idTurnoIgnorar);
+        boolean esHoy = fecha.equals(LocalDate.now());
+        LocalTime ahora = LocalTime.now();
+
+        int disponibles = 0;
+        for (LocalTime h : ConsultorioServicio.GRILLA_HORARIOS) {
+            boolean bloqueYaPaso = esHoy && h.isBefore(ahora);
+            boolean bloqueOcupado = ocupados.contains(h);
+            if (!bloqueYaPaso && !bloqueOcupado) {
+                disponibles++;
+            }
         }
-        System.out.println();
+
+        if (disponibles == 0) {
+            System.out.println(">> No hay horarios disponibles para el dia " + fecha.format(FORMATO_FECHA) + ".");
+            throw new OperacionCanceladaException();
+        }
 
         while (true) {
-            int opcion = leerEntero("Ingrese numero de bloque (1 al 18): ");
-            if (opcion >= 1 && opcion <= ConsultorioServicio.GRILLA_HORARIOS.length) {
-                return ConsultorioServicio.GRILLA_HORARIOS[opcion - 1];
+            System.out.println("\n--- HORARIOS DISPONIBLES PARA EL DIA " + fecha.format(FORMATO_FECHA) + " ---");
+            for (int i = 0; i < ConsultorioServicio.GRILLA_HORARIOS.length; i++) {
+                LocalTime h = ConsultorioServicio.GRILLA_HORARIOS[i];
+                boolean bloqueYaPaso = esHoy && h.isBefore(ahora);
+                boolean bloqueOcupado = ocupados.contains(h);
+
+                String estado;
+                if (bloqueOcupado) {
+                    estado = "[OCUPADO] ";
+                } else if (bloqueYaPaso) {
+                    estado = "[PASADO]  ";
+                } else {
+                    estado = "[LIBRE]   ";
+                }
+
+                System.out.printf("[%2d] %s %s  ", (i + 1), h, estado);
+                if ((i + 1) % 3 == 0) System.out.println();
             }
-            System.out.println("Numero fuera de rango. Ingrese un valor del 1 al 18.");
+            System.out.println();
+
+            int opcion = leerEnteroOpcion("Seleccione numero de bloque (1 al 18): ");
+            if (opcion < 1 || opcion > ConsultorioServicio.GRILLA_HORARIOS.length) {
+                System.out.println("Numero fuera de rango. Ingrese un valor del 1 al 18.");
+                continue;
+            }
+
+            LocalTime seleccionado = ConsultorioServicio.GRILLA_HORARIOS[opcion - 1];
+            if (ocupados.contains(seleccionado)) {
+                System.out.println(">> Error: El bloque " + seleccionado + " ya esta OCUPADO. Por favor, seleccione otro horario.");
+                continue;
+            }
+            if (esHoy && seleccionado.isBefore(ahora)) {
+                System.out.println(">> Error: El bloque " + seleccionado + " ya paso. Seleccione un horario posterior al actual.");
+                continue;
+            }
+
+            return seleccionado;
+        }
+    }
+
+    private static LocalDate leerFechaTurnoValidada(String mensaje) {
+        while (true) {
+            LocalDate fecha = leerFechaFormato(mensaje);
+            String errorNegocio = servicio.validarFechaParaTurno(fecha);
+            if (errorNegocio != null) {
+                System.out.println("Error: " + errorNegocio);
+                continue;
+            }
+            return fecha;
+        }
+    }
+
+    private static LocalDate leerFechaFormato(String mensaje) {
+        while (true) {
+            System.out.print(mensaje);
+            String entrada = leerCadenaTeclado();
+            try {
+                return LocalDate.parse(entrada, FORMATO_FECHA);
+            } catch (DateTimeParseException e) {
+                System.out.println("Formato de fecha invalido. Ingrese en formato DD/MM/AAAA (ej. 15/11/2026).");
+            }
         }
     }
 
     private static String leerDni() {
         while (true) {
             System.out.print("Ingrese DNI del paciente (7 u 8 digitos): ");
-            String entrada = scanner.nextLine().trim();
+            String entrada = leerCadenaTeclado();
             if (entrada.matches("^\\d{7,8}$")) {
                 return entrada;
             }
             System.out.println("Ingrese un numero de DNI valido (solo numeros, entre 7 y 8 digitos).");
-        }
-    }
-
-    private static LocalDate leerFecha(String mensaje) {
-        while (true) {
-            System.out.print(mensaje);
-            String entrada = scanner.nextLine().trim();
-            try {
-                return LocalDate.parse(entrada, FORMATO_FECHA);
-            } catch (DateTimeParseException e) {
-                System.out.println("Formato de fecha invalido. Ingrese en formato DD/MM/AAAA (ej. 15/11/2026).");
-            }
         }
     }
 
@@ -463,10 +522,10 @@ public class MainConsola {
         }
     }
 
-    private static int leerEntero(String mensaje) {
+    private static int leerEnteroOpcion(String mensaje) {
         while (true) {
             System.out.print(mensaje);
-            String entrada = scanner.nextLine().trim();
+            String entrada = leerCadenaTeclado();
             try {
                 return Integer.parseInt(entrada);
             } catch (NumberFormatException e) {
@@ -477,11 +536,20 @@ public class MainConsola {
 
     private static String leerTextoNoVacio() {
         while (true) {
-            String entrada = scanner.nextLine().trim();
+            String entrada = leerCadenaTeclado();
             if (!entrada.isEmpty()) {
-                return entrada;
+                // Proteccion para persistencia CSV: reemplaza comas por guiones
+                return entrada.replace(",", " - ");
             }
             System.out.print("El campo no puede estar vacio. Ingrese nuevamente: ");
         }
+    }
+
+    private static String leerCadenaTeclado() {
+        String entrada = scanner.nextLine().trim();
+        if (entrada.equalsIgnoreCase("MENU")) {
+            throw new OperacionCanceladaException();
+        }
+        return entrada;
     }
 }

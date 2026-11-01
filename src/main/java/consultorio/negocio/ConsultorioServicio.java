@@ -12,7 +12,9 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class ConsultorioServicio {
 
@@ -29,7 +31,6 @@ public class ConsultorioServicio {
     private List<Paciente> listaPacientes;
     private List<Turno> listaTurnos;
 
-    // Al instanciarse, carga los datos que existan en disco (Ciclo de Vida 1)
     public ConsultorioServicio() {
         this.listaPacientes = GestorArchivos.cargarPacientes();
         this.listaTurnos = GestorArchivos.cargarTurnos();
@@ -50,22 +51,61 @@ public class ConsultorioServicio {
     }
 
     public void registrarPaciente(String dni, String nombre, String telefono, String obraSocial) {
-        Paciente nuevo = new Paciente(dni, nombre, telefono, obraSocial);
+        if (dni == null || !dni.matches("^\\d{7,8}$")) {
+            throw new IllegalArgumentException("DNI invalido: debe contener 7 u 8 digitos numericos.");
+        }
+        if (nombre == null || nombre.trim().isEmpty()) {
+            throw new IllegalArgumentException("El nombre del paciente no puede estar vacio.");
+        }
+        Paciente nuevo = new Paciente(dni.trim(), nombre.trim(), telefono.trim(), obraSocial.trim());
         listaPacientes.add(nuevo);
-        // Persistencia inmediata
         GestorArchivos.guardarPacientes(listaPacientes);
     }
 
-    // ======================
-    // VALIDACIONES DE TURNOS 
-    // ======================
+    // ===================================
+    // VALIDACIONES CENTRALIZADAS DE TURNOS
+    // ===================================
 
-    // Retorna null si la fecha y hora estan disponibles; caso contrario devuelve el mensaje de error exacto
-    public String validarDisponibilidad(LocalDate fecha, LocalTime hora, int idTurnoIgnorar) {
-        // Solo lunes a viernes
+    public String validarFechaParaTurno(LocalDate fecha) {
+        if (fecha == null) {
+            return "La fecha no puede ser nula.";
+        }
+        if (fecha.isBefore(LocalDate.now())) {
+            return "La fecha no puede ser anterior al dia de hoy (" + LocalDate.now() + ").";
+        }
         DayOfWeek dia = fecha.getDayOfWeek();
         if (dia == DayOfWeek.SATURDAY || dia == DayOfWeek.SUNDAY) {
             return "El consultorio atiende unicamente de lunes a viernes.";
+        }
+        return null;
+    }
+
+    public Set<LocalTime> obtenerHorariosOcupados(LocalDate fecha, int idTurnoIgnorar) {
+        Set<LocalTime> ocupados = new HashSet<>();
+        if (fecha == null) return ocupados;
+
+        for (Turno t : listaTurnos) {
+            if (t.getIdTurno() == idTurnoIgnorar) {
+                continue;
+            }
+            if (t.getFecha().equals(fecha)) {
+                if (t.getEstado() == EstadoTurno.PENDIENTE || t.getEstado() == EstadoTurno.ATENDIDO) {
+                    ocupados.add(t.getHoraInicio());
+                }
+            }
+        }
+        return ocupados;
+    }
+
+    public String validarDisponibilidad(LocalDate fecha, LocalTime hora, int idTurnoIgnorar) {
+        String errorFecha = validarFechaParaTurno(fecha);
+        if (errorFecha != null) {
+            return errorFecha;
+        }
+
+        // Si la fecha es hoy, el horario no puede haber pasado
+        if (fecha.equals(LocalDate.now()) && hora.isBefore(LocalTime.now())) {
+            return "El horario seleccionado (" + hora + ") ya paso en el dia de hoy.";
         }
 
         // Horario dentro de la grilla (08:00 a 19:20)
@@ -81,22 +121,26 @@ public class ConsultorioServicio {
         }
 
         // No superposicion con turnos PENDIENTE o ATENDIDO
-        for (Turno t : listaTurnos) {
-            // Ignoramos el propio turno si estamos modificando/reprogramando
-            if (t.getIdTurno() == idTurnoIgnorar) {
-                continue;
-            }
-            if (t.getFecha().equals(fecha) && t.getHoraInicio().equals(hora)) {
-                if (t.getEstado() == EstadoTurno.PENDIENTE || t.getEstado() == EstadoTurno.ATENDIDO) {
-                    return "El bloque horario seleccionado ya se encuentra ocupado por otro turno pendiente.";
-                }
-            }
+        Set<LocalTime> ocupados = obtenerHorariosOcupados(fecha, idTurnoIgnorar);
+        if (ocupados.contains(hora)) {
+            return "El bloque horario seleccionado ya se encuentra ocupado por otro turno.";
         }
 
-        return null; // Todo en orden, bloque disponible
+        return null;
     }
 
-    // Calcula el siguiente ID autoincremental buscando el id mas alto guardado
+    public boolean tieneTurnoPendienteEnFecha(String dni, LocalDate fecha) {
+        if (dni == null || fecha == null) return false;
+        for (Turno t : listaTurnos) {
+            if (t.getDniPaciente().equalsIgnoreCase(dni.trim()) 
+                    && t.getFecha().equals(fecha) 
+                    && t.getEstado() == EstadoTurno.PENDIENTE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private int generarProximoIdTurno() {
         int maxId = 0;
         for (Turno t : listaTurnos) {
@@ -111,12 +155,18 @@ public class ConsultorioServicio {
     // OPERACIONES DE TURNOS 
     // ======================
 
-    // Registrar un nuevo turno
     public void registrarTurno(String dniPaciente, LocalDate fecha, LocalTime hora, String motivo) {
+        String error = validarDisponibilidad(fecha, hora, -1);
+        if (error != null) {
+            throw new IllegalArgumentException(error);
+        }
+        if (buscarPacientePorDni(dniPaciente) == null) {
+            throw new IllegalArgumentException("No se puede registrar un turno a un paciente no registrado.");
+        }
+
         int nuevoId = generarProximoIdTurno();
-        Turno nuevoTurno = new Turno(nuevoId, dniPaciente, fecha, hora, motivo, EstadoTurno.PENDIENTE);
+        Turno nuevoTurno = new Turno(nuevoId, dniPaciente.trim(), fecha, hora, motivo.trim(), EstadoTurno.PENDIENTE);
         listaTurnos.add(nuevoTurno);
-        // Persistencia inmediata
         GestorArchivos.guardarTurnos(listaTurnos);
     }
 
@@ -129,7 +179,6 @@ public class ConsultorioServicio {
         return null;
     }
 
-    // Cancelacion con regla de 24 horas
     public String cancelarTurno(int idTurno) {
         Turno turno = buscarTurnoPorId(idTurno);
         if (turno == null) {
@@ -142,19 +191,21 @@ public class ConsultorioServicio {
         LocalDateTime ahora = LocalDateTime.now();
         LocalDateTime fechaHoraTurno = LocalDateTime.of(turno.getFecha(), turno.getHoraInicio());
 
-        // Verificamos si faltan al menos 24 horas (1440 minutos)
+        // Si el turno ya paso temporalmente, no corresponde cancelarlo sino marcar asistencia
+        if (fechaHoraTurno.isBefore(ahora)) {
+            return "El turno ya paso. No corresponde cancelarlo; registreselo como AUSENTE en la opcion 7.";
+        }
+
         long minutosHastaTurno = Duration.between(ahora, fechaHoraTurno).toMinutes();
         if (minutosHastaTurno < 1440) {
             return "No es posible realizar la cancelacion con menos de 24 horas de anticipacion.";
         }
 
-        // No se borra fisicamente, cambia a CANCELADO (libera el horario de inmediato)
         turno.setEstado(EstadoTurno.CANCELADO);
         GestorArchivos.guardarTurnos(listaTurnos);
         return null;
     }
 
-    // Modificar / Reprogramar turno PENDIENTE
     public String modificarTurno(int idTurno, LocalDate nuevaFecha, LocalTime nuevaHora, String nuevoMotivo) {
         Turno turno = buscarTurnoPorId(idTurno);
         if (turno == null) {
@@ -164,7 +215,6 @@ public class ConsultorioServicio {
             return "Solo se pueden reprogramar turnos en estado PENDIENTE.";
         }
 
-        // Validamos disponibilidad ignorando este mismo idTurno
         String error = validarDisponibilidad(nuevaFecha, nuevaHora, idTurno);
         if (error != null) {
             return error;
@@ -175,10 +225,9 @@ public class ConsultorioServicio {
         turno.setMotivo(nuevoMotivo);
 
         GestorArchivos.guardarTurnos(listaTurnos);
-        return null; // Exito
+        return null;
     }
 
-    // Registrar asistencia (ATENDIDO o AUSENTE)
     public String registrarAsistencia(int idTurno, EstadoTurno nuevoEstado) {
         Turno turno = buscarTurnoPorId(idTurno);
         if (turno == null) {
@@ -191,65 +240,65 @@ public class ConsultorioServicio {
             return "El estado debe ser ATENDIDO o AUSENTE.";
         }
 
+        // No permite marcar asistencia antes de que llegue la hora del turno
+        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime fechaHoraTurno = LocalDateTime.of(turno.getFecha(), turno.getHoraInicio());
+        if (fechaHoraTurno.isAfter(ahora)) {
+            return "No es posible registrar asistencia para un turno futuro (Fecha: " 
+                    + turno.getFecha() + " " + turno.getHoraInicio() + ").";
+        }
+
         turno.setEstado(nuevoEstado);
         GestorArchivos.guardarTurnos(listaTurnos);
-        return null; // Exito
+        return null;
     }
 
     // =============================
     // CONSULTAS, HISTORIAL Y AGENDA 
     // =============================
 
-    // Retorna todos los turnos PENDIENTES de un paciente (para cancelar o reprogramar)
     public List<Turno> obtenerTurnosPendientesPorDni(String dni) {
         List<Turno> resultado = new ArrayList<>();
         for (Turno t : listaTurnos) {
-            if (t.getDniPaciente().equalsIgnoreCase(dni.trim()) && t.getEstado() == EstadoTurno.PENDIENTE) {
-                resultado.add(t);
+            if (t.getDniPaciente().equalsIgnoreCase(dni.trim())) {
+                if (t.getEstado() == EstadoTurno.PENDIENTE) {
+                    resultado.add(t);
+                }
             }
         }
         resultado.sort(Comparator.comparing(Turno::getFecha).thenComparing(Turno::getHoraInicio));
         return resultado;
     }
 
-    // Agenda diaria de un dia especifico (solo turnos activos, ordenados de menor a mayor)
     public List<Turno> obtenerAgendaDiaria(LocalDate fecha) {
         List<Turno> resultado = new ArrayList<>();
         for (Turno t : listaTurnos) {
-            // En la agenda diaria se muestran los que no estan CANCELADOS
             if (t.getFecha().equals(fecha) && t.getEstado() != EstadoTurno.CANCELADO) {
                 resultado.add(t);
             }
         }
-        // Orden cronologico por hora
         resultado.sort(Comparator.comparing(Turno::getHoraInicio));
         return resultado;
     }
 
-    // Historial completo filtrado por DNI y/o rango de fechas
     public List<Turno> filtrarHistorial(String dni, LocalDate fechaDesde, LocalDate fechaHasta) {
         List<Turno> resultado = new ArrayList<>();
 
         for (Turno t : listaTurnos) {
-            // Filtro por DNI (si se especifico)
             if (dni != null && !dni.trim().isEmpty()) {
                 if (!t.getDniPaciente().equalsIgnoreCase(dni.trim())) {
                     continue;
                 }
             }
-            // Filtro por fecha desde (si se especifico)
             if (fechaDesde != null && t.getFecha().isBefore(fechaDesde)) {
                 continue;
             }
-            // Filtro por fecha hasta (si se especifico)
             if (fechaHasta != null && t.getFecha().isAfter(fechaHasta)) {
                 continue;
             }
-
             resultado.add(t);
         }
 
-        // Ordenar por Fecha ASC y luego Hora ASC
         resultado.sort(Comparator.comparing(Turno::getFecha).thenComparing(Turno::getHoraInicio));
         return resultado;
     }
