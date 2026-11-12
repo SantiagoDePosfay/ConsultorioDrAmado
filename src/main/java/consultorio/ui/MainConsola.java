@@ -5,6 +5,8 @@ import consultorio.modelo.Paciente;
 import consultorio.modelo.Turno;
 import consultorio.negocio.ConsultorioServicio;
 import consultorio.negocio.GeneradorPDF;
+import consultorio.negocio.FormateadorTexto;
+import consultorio.negocio.OrdenadorTurnos;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -14,15 +16,34 @@ import java.util.List;
 import java.util.Scanner;
 import java.util.Set;
 
+/**
+ * Clase principal de la interfaz de usuario por consola. Gestiona el menú interactivo,
+ * la captura de datos por teclado, las validaciones de entrada y la interacción 
+ * con la capa de negocio del consultorio médico.
+ */
 public class MainConsola {
-
+    
+    /** Lector universal de entradas por consola. */
     private static final Scanner scanner = new Scanner(System.in);
+    
+    /** Instancia del servicio de negocio para operaciones de pacientes y turnos. */
     private static final ConsultorioServicio servicio = new ConsultorioServicio();
+    
+    /** Formateador estándar de fechas en formato DD/MM/AAAA. */
     private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
-    // Excepcion interna para cancelar cualquier carga y retornar al menu principal
+    /**
+     * Excepción interna utilizada para interrumpir cualquier flujo de carga de datos 
+     * y retornar de manera limpia al menú principal ante la orden del usuario.
+     */
     private static class OperacionCanceladaException extends RuntimeException {}
-
+    
+    /**
+     * Método principal (punto de entrada de la aplicación en consola).
+     * Mantiene el ciclo de ejecución del menú principal hasta que el usuario decida salir.
+     * 
+     * @param args Argumentos de la línea de comandos.
+     */
     public static void main(String[] args) {
         int opcion = -1;
 
@@ -71,7 +92,10 @@ public class MainConsola {
     // ==========================================
     // MENU PRINCIPAL
     // ==========================================
-
+    
+    /**
+     * Despliega en la consola el menú de opciones principal del sistema de gestión.
+     */
     private static void mostrarMenuPrincipal() {
         System.out.println("\n=======================================================");
         System.out.println("  SISTEMA DE GESTION DE TURNOS - DR. SALVADOR AMADO");
@@ -92,7 +116,11 @@ public class MainConsola {
     // ==================================
     // FUNCIONALIDAD 1: ALTA DE PACIENTE 
     // ==================================
-
+    
+    /**
+     * Gestiona el flujo por consola para identificar a un paciente por su DNI 
+     * o darlo de alta en caso de que no se encuentre registrado en el sistema.
+     */
     private static void registrarPaciente() {
         System.out.println("\n--- IDENTIFICAR / DAR DE ALTA PACIENTE ---");
         String dni = leerDni();
@@ -105,7 +133,7 @@ public class MainConsola {
         }
 
         System.out.print("Ingrese nombre completo: ");
-        String nombre = leerTextoNoVacio();
+        String nombre = FormateadorTexto.capitalizarTexto(scanner.nextLine());
 
         System.out.print("Ingrese telefono: ");
         String telefono = leerTextoNoVacio();
@@ -120,7 +148,12 @@ public class MainConsola {
     // ================================
     // FUNCIONALIDAD 2: REGISTRAR TURNO 
     // ================================
-
+    
+    /**
+     * Administra el proceso de registro de un nuevo turno médico, verificando la existencia 
+     * previa del paciente (dándolo de alta al paso si es necesario), validando fechas, 
+     * alertas de duplicidad diaria y selección de bloques en la grilla horaria.
+     */
     private static void registrarNuevoTurno() {
         System.out.println("\n--- REGISTRAR NUEVO TURNO ---");
         String dni = leerDni();
@@ -129,7 +162,7 @@ public class MainConsola {
         if (paciente == null) {
             System.out.println("Paciente no registrado. Ingrese sus datos para darlo de alta:");
             System.out.print("Nombre completo: ");
-            String nombre = leerTextoNoVacio();
+            String nombre = FormateadorTexto.capitalizarTexto(leerTextoNoVacio());
             System.out.print("Telefono: ");
             String telefono = leerTextoNoVacio();
             System.out.print("Obra social (o 'Particular'): ");
@@ -143,7 +176,7 @@ public class MainConsola {
 
         LocalDate fecha = leerFechaTurnoValidada("Ingrese fecha del turno (DD/MM/AAAA): ");
 
-        // Alerta preventiva si ya tiene otro turno pendiente el mismo dia
+        // Alerta preventiva si ya tiene otro turno pendiente el mismo dia.
         if (servicio.tieneTurnoPendienteEnFecha(dni, fecha)) {
             System.out.println("\n[!] ADVERTENCIA: El paciente ya posee otro turno PENDIENTE para el dia " + fecha.format(FORMATO_FECHA) + ".");
             System.out.print("Desea asignarle un turno adicional para este mismo dia? (S/N): ");
@@ -166,7 +199,10 @@ public class MainConsola {
     // ===============================================
     // FUNCIONALIDAD 3: VER / EXPORTAR AGENDA DE HOY 
     // ===============================================
-
+    
+    /**
+     * Consulta y despliega la agenda de turnos correspondiente al día actual.
+     */
     private static void consultarAgendaHoy() {
         LocalDate hoy = LocalDate.now();
         System.out.println("\n--- AGENDA DEL DIA DE HOY (" + hoy.format(FORMATO_FECHA) + ") ---");
@@ -176,20 +212,30 @@ public class MainConsola {
     // ==================================================
     // FUNCIONALIDAD 4: VER / EXPORTAR AGENDA POR FECHA 
     // ==================================================
-
+    
+    /**
+     * Solicita una fecha por teclado y consulta la agenda de turnos correspondiente.
+     */
     private static void consultarAgendaPorFecha() {
         System.out.println("\n--- CONSULTAR AGENDA POR FECHA ---");
         LocalDate fecha = leerFechaFormato("Ingrese fecha a consultar (DD/MM/AAAA): ");
         procesarConsultaAgenda(fecha);
     }
-
+    
+    /**
+     * Procesa la consulta de una agenda en una fecha específica, ordenando los turnos cronológicamente,
+     * mostrándolos en pantalla y ofreciendo la opción de exportarlos a un archivo PDF.
+     * 
+     * @param fecha La fecha de la agenda a procesar.
+     */
     private static void procesarConsultaAgenda(LocalDate fecha) {
         List<Turno> turnos = servicio.obtenerAgendaDiaria(fecha);
         if (turnos.isEmpty()) {
             System.out.println("No hay turnos asignados para la fecha seleccionada (" + fecha.format(FORMATO_FECHA) + ").");
             return;
         }
-
+        
+        OrdenadorTurnos.ordenarCronologicamente(turnos);
         mostrarListadoTurnosConDetalle(turnos);
 
         System.out.print("\nDesea exportar esta agenda a PDF? (S/N): ");
@@ -205,7 +251,11 @@ public class MainConsola {
     // ================================
     // FUNCIONALIDAD 5: CANCELAR TURNO
     // ================================
-
+    
+    /**
+     * Gestiona el proceso de cancelación de un turno pendiente de un paciente, 
+     * validando la regla de anticipación mínima de 24 horas.
+     */
     private static void cancelarTurno() {
         System.out.println("\n--- CANCELAR TURNO (REGLA 24 HS) ---");
         String dni = leerDni();
@@ -249,7 +299,10 @@ public class MainConsola {
     // =========================================
     // FUNCIONALIDAD 6: MODIFICAR / REPROGRAMAR 
     // =========================================
-
+    
+    /**
+     * Permite modificar o reprogramar la fecha, hora y motivo de un turno pendiente existente.
+     */
     private static void modificarTurno() {
         System.out.println("\n--- MODIFICAR / REPROGRAMAR TURNO ---");
         String dni = leerDni();
@@ -298,7 +351,10 @@ public class MainConsola {
     // ==========================================
     // FUNCIONALIDAD 7: ASISTENCIA
     // ==========================================
-
+    
+    /**
+     * Registra la asistencia de un paciente (Atendido o Ausente) para un turno cuyo horario ya haya transcurrido.
+     */
     private static void registrarAsistencia() {
         System.out.println("\n--- REGISTRAR ASISTENCIA ---");
         int idTurno = leerEnteroOpcion("Ingrese ID del turno (0 para volver): ");
@@ -342,7 +398,11 @@ public class MainConsola {
     // ===========================
     // FUNCIONALIDAD 8: HISTORIAL 
     // ===========================
-
+    
+    /**
+     * Permite consultar el historial de turnos aplicando filtros opcionales de DNI y rangos de fechas,
+     * mostrando un listado detallado cronológico y un resumen cuantitativo de estados.
+     */
     private static void consultarHistorial() {
         System.out.println("\n--- CONSULTAR HISTORIAL DE TURNOS ---");
         System.out.println("Opciones de filtrado (Enter en blanco para omitir filtro):");
@@ -369,6 +429,7 @@ public class MainConsola {
             return;
         }
 
+        OrdenadorTurnos.ordenarCronologicamente(historial);
         mostrarListadoTurnosConDetalle(historial);
 
         int cantPendientes = 0, cantAtendidos = 0, cantCancelados = 0, cantAusentes = 0;
@@ -390,7 +451,12 @@ public class MainConsola {
     // ==========================================
     // METODOS AUXILIARES Y LECTURAS VALIDATORIAS
     // ==========================================
-
+    
+    /**
+     * Muestra por consola un listado formateado en tabla con los detalles completos de los turnos provistos.
+     * 
+     * @param turnos La {@link List} de turnos a desplegar.
+     */
     private static void mostrarListadoTurnosConDetalle(List<Turno> turnos) {
         System.out.println("\n------------------------------------------------------------------------------------------------------");
         System.out.printf("%-4s | %-10s | %-13s | %-8s | %-20s | %-12s | %-10s\n", 
@@ -414,7 +480,15 @@ public class MainConsola {
         }
         System.out.println("------------------------------------------------------------------------------------------------------");
     }
-
+    
+    /**
+     * Despliega la grilla de 18 bloques horarios diarios e interactúa con el usuario 
+     * para que seleccione un bloque libre válido.
+     * 
+     * @param fecha La fecha para la cual se consultan los horarios.
+     * @param idTurnoIgnorar ID de turno a omitir en la validación (en caso de reprogramación), o -1.
+     * @return El objeto {@link LocalTime} seleccionado por el usuario.
+     */
     private static LocalTime seleccionarHorarioDeGrilla(LocalDate fecha, int idTurnoIgnorar) {
         Set<LocalTime> ocupados = servicio.obtenerHorariosOcupados(fecha, idTurnoIgnorar);
         boolean esHoy = fecha.equals(LocalDate.now());
@@ -474,7 +548,13 @@ public class MainConsola {
             return seleccionado;
         }
     }
-
+    
+    /**
+     * Lee y valida por teclado una fecha apta para la creación o modificación de turnos.
+     * 
+     * @param mensaje Mensaje orientativo para solicitar la fecha.
+     * @return Un objeto {@link LocalDate} validado.
+     */
     private static LocalDate leerFechaTurnoValidada(String mensaje) {
         while (true) {
             LocalDate fecha = leerFechaFormato(mensaje);
@@ -486,7 +566,13 @@ public class MainConsola {
             return fecha;
         }
     }
-
+    
+    /**
+     * Lee una cadena por teclado y reitera la solicitud hasta que se ingrese una fecha válida en formato DD/MM/AAAA.
+     * 
+     * @param mensaje Mensaje orientativo para el ingreso.
+     * @return La {@link LocalDate} parseada correctamente.
+     */
     private static LocalDate leerFechaFormato(String mensaje) {
         while (true) {
             System.out.print(mensaje);
@@ -498,7 +584,12 @@ public class MainConsola {
             }
         }
     }
-
+    
+    /**
+     * Solicita y valida por teclado un número de DNI válido (de 7 u 8 dígitos numéricos).
+     * 
+     * @return Una cadena con el DNI validado.
+     */
     private static String leerDni() {
         while (true) {
             System.out.print("Ingrese DNI del paciente (7 u 8 digitos): ");
@@ -509,7 +600,13 @@ public class MainConsola {
             System.out.println("Ingrese un numero de DNI valido (solo numeros, entre 7 y 8 digitos).");
         }
     }
-
+    
+    /**
+     * Parsea opcionalmente una cadena de fecha ingresada por teclado (para filtros de historial).
+     * 
+     * @param entrada Cadena de texto con la fecha.
+     * @return El objeto {@link LocalDate} correspondiente, o {@code null} si está vacía o es inválida.
+     */
     private static LocalDate parsearFechaOpcional(String entrada) {
         if (entrada == null || entrada.trim().isEmpty()) {
             return null;
@@ -521,7 +618,13 @@ public class MainConsola {
             return null;
         }
     }
-
+    
+    /**
+     * Lee y valida por teclado un número entero correspondiente a una opción de menú.
+     * 
+     * @param mensaje Mensaje orientativo para la lectura.
+     * @return El número entero ingresado.
+     */
     private static int leerEnteroOpcion(String mensaje) {
         while (true) {
             System.out.print(mensaje);
@@ -533,7 +636,12 @@ public class MainConsola {
             }
         }
     }
-
+    
+    /**
+     * Lee una cadena de texto obligatoria por teclado, evitando campos vacíos y sanitizando comas para CSV.
+     * 
+     * @return La cadena sanitizada y no vacía.
+     */
     private static String leerTextoNoVacio() {
         while (true) {
             String entrada = leerCadenaTeclado();
@@ -544,7 +652,14 @@ public class MainConsola {
             System.out.print("El campo no puede estar vacio. Ingrese nuevamente: ");
         }
     }
-
+    
+    /**
+     * Lee una línea de texto desde el teclado, recortando espacios y evaluando 
+     * si el usuario escribió la orden de cancelación 'MENU'.
+     * 
+     * @return La cadena de texto ingresada.
+     * @throws OperacionCanceladaException si el usuario escribe 'MENU'.
+     */
     private static String leerCadenaTeclado() {
         String entrada = scanner.nextLine().trim();
         if (entrada.equalsIgnoreCase("MENU")) {

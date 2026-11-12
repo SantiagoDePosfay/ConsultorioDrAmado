@@ -20,8 +20,21 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+/**
+ * Clase utilitaria encargada de la generación y exportación de reportes en formato PDF
+ * utilizando la librería OpenPDF para las agendas diarias de turnos del consultorio.
+ */
 public class GeneradorPDF {
-
+    
+    /**
+     * Exporta la agenda diaria de turnos a un archivo PDF estructurado con una tabla detallada
+     * que incluye horarios, datos del paciente, obra social, motivo y estado del turno.
+     * 
+     * @param fecha La fecha correspondiente a la agenda que se desea exportar.
+     * @param turnos La lista de objetos {@link Turno} activos para el día indicado.
+     * @param servicio Instancia de {@link ConsultorioServicio} utilizada para consultar los datos detallados de los pacientes.
+     * @return {@code true} si el archivo PDF se generó y guardó exitosamente; {@code false} si ocurrió algún error de escritura o E/S.
+     */
     public static boolean exportarAgendaPDF(LocalDate fecha, List<Turno> turnos, ConsultorioServicio servicio) {
         String nombreArchivo = "agenda_" + fecha.toString() + ".pdf";
         Document documento = new Document();
@@ -30,19 +43,19 @@ public class GeneradorPDF {
             PdfWriter.getInstance(documento, new FileOutputStream(nombreArchivo));
             documento.open();
 
-            // Título del informe 
+            // Título del informe.
             Font fuenteTitulo = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 16, Color.DARK_GRAY);
             String fechaFormateada = fecha.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
             Paragraph titulo = new Paragraph("Consultorio Dr. Salvador Amado\nAgenda del día: " + fechaFormateada + "\n\n", fuenteTitulo);
             titulo.setAlignment(Element.ALIGN_CENTER);
             documento.add(titulo);
 
-            // Tabla con 7 columnas
+            // Tabla con 7 columnas.
             PdfPTable tabla = new PdfPTable(7);
             tabla.setWidthPercentage(100);
             tabla.setWidths(new float[]{1.5f, 1.8f, 2.5f, 2.0f, 1.8f, 2.5f, 1.8f});
 
-            // Encabezados de tabla
+            // Encabezados de tabla.
             String[] encabezados = {"Hora", "DNI", "Paciente", "Teléfono", "Obra Social", "Motivo", "Estado"};
             Font fuenteCabecera = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, Color.WHITE);
 
@@ -54,7 +67,7 @@ public class GeneradorPDF {
                 tabla.addCell(celda);
             }
 
-            // Filas con los turnos del día
+            // Filas con los turnos del día.
             Font fuenteCuerpo = FontFactory.getFont(FontFactory.HELVETICA, 9, Color.BLACK);
             for (Turno t : turnos) {
                 Paciente p = servicio.buscarPacientePorDni(t.getDniPaciente());
