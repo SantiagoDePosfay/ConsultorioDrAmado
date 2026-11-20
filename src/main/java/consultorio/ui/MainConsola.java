@@ -133,7 +133,7 @@ public class MainConsola {
         }
 
         System.out.print("Ingrese nombre completo: ");
-        String nombre = FormateadorTexto.capitalizarTexto(scanner.nextLine());
+        String nombre = FormateadorTexto.capitalizarTexto(leerTextoNoVacio());
 
         System.out.print("Ingrese telefono: ");
         String telefono = leerTextoNoVacio();
@@ -662,7 +662,7 @@ public class MainConsola {
      */
     private static String leerCadenaTeclado() {
         String entrada = scanner.nextLine().trim();
-        if (entrada.equalsIgnoreCase("MENU")) {
+        if (entrada.equalsIgnoreCase("MENU") || entrada.equalsIgnoreCase("MENÚ")) {
             throw new OperacionCanceladaException();
         }
         return entrada;
